@@ -103,6 +103,10 @@ def fetch_sector_pe_ratio(sector):
 def analyze_with_gpt(fundamental_data):
     client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
+    # Convert ROE and ROA to percentages for better readability
+    roe_percentage = f"{float(fundamental_data['ROE']) * 100:.2f}%" if fundamental_data['ROE'] != "N/A" else "N/A"
+    roa_percentage = f"{float(fundamental_data['ROA']) * 100:.2f}%" if fundamental_data['ROA'] != "N/A" else "N/A"
+
     prompt = f"""
     You are a financial analyst evaluating the stock {fundamental_data['Ticker']} ({fundamental_data['Company Name']}).
 
@@ -118,8 +122,8 @@ def analyze_with_gpt(fundamental_data):
     - Total Liabilities: {fundamental_data['Total Liabilities']}
     - EPS: {fundamental_data['EPS']}
     - Debt/Equity Ratio: {fundamental_data['Debt/Equity Ratio']}
-    - ROE: {fundamental_data['ROE']}
-    - ROA: {fundamental_data['ROA']}
+    - ROE: {roe_percentage}
+    - ROA: {roa_percentage}
 
     - Compare the stock’s P/E ratio to its **sector average P/E** to determine if it is **undervalued or overvalued.**
     - Apply a **discount (10-20%) if the stock appears overvalued.**
