@@ -4,25 +4,26 @@ import requests
 import pandas as pd
 import re
 from datetime import datetime
+from difflib import get_close_matches  # For fuzzy sector matching
 
 # Load API Keys from Streamlit Secrets
 AV_API_KEY = st.secrets["ALPHA_VANTAGE_API_KEY"]
 FMP_API_KEY = st.secrets["FMP_API_KEY"]
 OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
 
-# Function to Format Large Numbers
-def format_large_number(value):
-    try:
-        value = float(value)
-        if value >= 1e12:
-            return f"{value / 1e12:.2f}T"
-        elif value >= 1e9:
-            return f"{value / 1e9:.2f}B"
-        elif value >= 1e6:
-            return f"{value / 1e6:.2f}M"
-        return f"{value:.2f}"
-    except:
-        return value
+# Cache Sector List to Avoid Multiple API Calls
+@st.cache_data
+def fetch_fmp_sector_list():
+    """Fetch the latest list of sectors from FMP"""
+    url = f"https://financialmodelingprep.com/api/v4/sector_price_earning_ratio?date={datetime.today().strftime('%Y-%m-%d')}&exchange=NYSE&apikey={FMP_API_KEY}"
+    response = requests.get(url).json()
+    return [entry["sector"] for entry in response] if isinstance(response, list) else []
+
+# Get Closest Matching Sector
+def get_best_sector_match(av_sector, fmp_sectors):
+    """Find the closest matching sector from FMP's sector list"""
+    matches = get_close_matches(av_sector, fmp_sectors, n=1, cutoff=0.6)
+    return matches[0] if matches else "N/A"
 
 # Fetch Stock Data from Alpha Vantage & Sector P/E from FMP
 def fetch_fundamental_data(ticker):
@@ -31,11 +32,16 @@ def fetch_fundamental_data(ticker):
     # Fetch Company Overview
     overview_response = requests.get(f"{base_url_av}?function=OVERVIEW&symbol={ticker}&apikey={AV_API_KEY}").json()
     
-    # Extract Sector
-    company_sector = overview_response.get("Sector", "N/A").strip()
+    # Extract Sector & Dynamically Match to FMP
+    av_sector = overview_response.get("Sector", "N/A").strip()
+    fmp_sector_list = fetch_fmp_sector_list()
+    matched_sector = get_best_sector_match(av_sector, fmp_sector_list)
 
     # Fetch Sector P/E Ratio
-    sector_pe = fetch_sector_pe_ratio(company_sector)
+    sector_pe = fetch_sector_pe_ratio(matched_sector)
+
+    # Fetch Latest Stock Price
+    stock_price = fetch_stock_price(ticker)
 
     # Fetch Financial Statements
     income_response = requests.get(f"{base_url_av}?function=INCOME_STATEMENT&symbol={ticker}&apikey={AV_API_KEY}").json()
@@ -54,9 +60,11 @@ def fetch_fundamental_data(ticker):
     fundamental_data = {
         "Ticker": ticker,
         "Company Name": overview_response.get("Name", "N/A"),
-        "Sector": company_sector,
+        "Sector (Alpha Vantage)": av_sector,
+        "Sector (FMP Matched)": matched_sector,
         "Sector P/E": sector_pe,
         "Market Cap": format_large_number(overview_response.get('MarketCapitalization', '0')),
+        "Stock Price": f"${stock_price}",
         "Revenue": format_large_number(latest_income.get('totalRevenue', '0')),
         "Net Income": format_large_number(latest_income.get('netIncome', '0')),
         "Total Assets": format_large_number(total_assets),
@@ -72,6 +80,7 @@ def fetch_fundamental_data(ticker):
 
 # Fetch Sector P/E Ratio from FMP
 def fetch_sector_pe_ratio(sector):
+    """Fetch the P/E ratio for a matched sector from FMP"""
     base_url_fmp = "https://financialmodelingprep.com/api/v4/sector_price_earning_ratio"
     today_date = datetime.today().strftime('%Y-%m-%d')
 
@@ -87,60 +96,50 @@ def fetch_sector_pe_ratio(sector):
     except Exception as e:
         return "N/A"
 
-# Determine Fair Value Price (Stable vs Growth)
-def determine_fair_value(fundamental_data):
-    pe_ratio = fundamental_data.get("P/E Ratio", "N/A")
-    eps = fundamental_data.get("EPS", "N/A")
-
+# Fetch Latest Stock Price
+def fetch_stock_price(ticker):
+    """Fetch the latest stock price from Alpha Vantage"""
+    base_url_av = "https://www.alphavantage.co/query"
     try:
-        pe_ratio = float(pe_ratio)
-        eps = float(eps)
+        response = requests.get(f"{base_url_av}?function=TIME_SERIES_DAILY&symbol={ticker}&apikey={AV_API_KEY}")
+        data = response.json()
+        latest_date = list(data["Time Series (Daily)"].keys())[0]
+        return float(data["Time Series (Daily)"][latest_date]["4. close"])
+    except Exception:
+        return "N/A"
 
-        if pe_ratio < 20:  # Likely a stable company
-            fair_value = eps * 15  # Conservative multiple
-        else:  # Growth stock
-            fair_value = eps * 30  # Aggressive multiple
-
-        return round(fair_value, 2)
-    except:
-        return "Not Available"
-
-# Analyze Stock Data with OpenAI GPT-4 (Fix Formatting Issues)
+# AI Analysis with OpenAI GPT-4
 def analyze_with_gpt(fundamental_data):
     client = openai.OpenAI(api_key=OPENAI_API_KEY)
-
-    fair_value = determine_fair_value(fundamental_data)
 
     prompt = f"""
     You are a financial analyst evaluating {fundamental_data['Company Name']} ({fundamental_data['Ticker']}).
 
-    - Sector: {fundamental_data['Sector']}
-    - Sector P/E Ratio: {fundamental_data['Sector P/E']}
-    - Stock P/E Ratio: {fundamental_data['P/E Ratio']}
+    Key fundamentals:
+    - Sector: {fundamental_data['Sector (FMP Matched)']}
+    - Sector P/E: {fundamental_data['Sector P/E']}
+    - Stock P/E: {fundamental_data['P/E Ratio']}
     - Market Cap: {fundamental_data['Market Cap']}
     - Revenue: {fundamental_data['Revenue']}
     - Net Income: {fundamental_data['Net Income']}
     - EPS: {fundamental_data['EPS']}
     - Debt/Equity Ratio: {fundamental_data['Debt/Equity Ratio']}
-    - Fair Value Estimate: {fair_value}
 
-    Provide a well-structured financial analysis **without using Markdown formatting**.
+    Given the above, analyze if the stock is overvalued or undervalued.
     """
 
     response = client.chat.completions.create(
         model="gpt-4",
-        messages=[
-            {"role": "system", "content": "You are a professional stock analyst. Avoid using markdown formatting."},
-            {"role": "user", "content": prompt}
-        ]
+        messages=[{"role": "system", "content": "Provide a financial analysis."},
+                  {"role": "user", "content": prompt}]
     )
 
-    return response.choices[0].message.content.replace("*", ""), fair_value
+    return response.choices[0].message.content
 
 # Streamlit UI
 st.set_page_config(page_title="AI Stock Screener", page_icon="📈", layout="centered")
 st.title("📊 AI-Powered Stock Screener")
-st.write("Enter a stock ticker to get fundamental analysis and a fair value price.")
+st.write("Enter a stock ticker to get AI-powered fundamental analysis and a fair value estimate.")
 
 ticker = st.text_input("🔎 Enter a stock ticker (e.g., TSLA, AAPL):", max_chars=10)
 
@@ -152,12 +151,9 @@ if st.button("Analyze Stock"):
             st.dataframe(pd.DataFrame(data.items(), columns=["Metric", "Value"]))
 
             with st.spinner("Running AI analysis..."):
-                analysis, fair_value = analyze_with_gpt(data)
-
+                ai_analysis = analyze_with_gpt(data)
                 st.subheader("🤖 AI Analysis")
-                st.success(analysis)
-                st.subheader("💰 Fair Value Estimate")
-                st.warning(f"${int(fair_value)}")  # Remove decimals
+                st.success(ai_analysis)
 
     else:
         st.error("❌ Please enter a valid stock ticker.")
