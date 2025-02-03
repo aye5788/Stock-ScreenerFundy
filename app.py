@@ -74,13 +74,13 @@ def analyze_with_gpt(fundamental_data):
     - Calculating a fair value estimate based on EPS and a reasonable P/E.
     - Applying a discount of 10-20% to ensure a margin of safety.
 
-    Provide a **final rating from 1-5** and a brief investment outlook.
+    **Return the response in plain text. Avoid using markdown formatting like underscores or asterisks.**
     """
 
     response = client.chat.completions.create(
         model="gpt-4",
         messages=[
-            {"role": "system", "content": "You are a professional stock analyst."},
+            {"role": "system", "content": "You are a professional stock analyst. Ensure the response is in plain text without markdown formatting."},
             {"role": "user", "content": prompt}
         ]
     )
@@ -110,7 +110,11 @@ if st.button("Analyze Stock"):
                 # 🎯 AI Analysis with Target Buy Price
                 st.subheader("🤖 AI Analysis")
                 st.success("### Key Takeaways")
-                for line in analysis.split("\n"):
+                
+                # **Ensure text is displayed in a normal font**
+                clean_text = analysis.replace("_", "").replace("*", "")  
+
+                for line in clean_text.split("\n"):
                     if line.strip():
                         if "Target Buy Price" in line:
                             st.warning(f"🎯 {line}")  # Highlight target buy price
