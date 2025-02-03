@@ -17,11 +17,11 @@ def fetch_fundamental_data(ticker):
     # Fetch Company Overview from Alpha Vantage
     overview_response = requests.get(f"{base_url_av}?function=OVERVIEW&symbol={ticker}&apikey={AV_API_KEY}").json()
     
-    # Extract Correct **Sector**
-    company_sector = overview_response.get("Sector", "N/A")
+    # Get FMP Sector & Industry (Override AV)
+    fmp_sector, fmp_industry = fetch_fmp_sector(ticker)
 
-    # Fetch Sector P/E Ratio from FMP using the correct sector
-    sector_pe = fetch_sector_pe_ratio(company_sector)
+    # Fetch Sector P/E Ratio using FMP's sector
+    sector_pe = fetch_sector_pe_ratio(fmp_sector)
 
     # Fetch Income & Balance Sheet Data
     income_response = requests.get(f"{base_url_av}?function=INCOME_STATEMENT&symbol={ticker}&apikey={AV_API_KEY}").json()
@@ -41,8 +41,8 @@ def fetch_fundamental_data(ticker):
     fundamental_data = {
         "Ticker": ticker,
         "Company Name": overview_response.get("Name", "N/A"),
-        "Sector": company_sector,
-        "Industry": overview_response.get("Industry", "N/A"),
+        "Sector": fmp_sector,  # Use FMP sector, NOT AV's
+        "Industry": fmp_industry,
         "Sector P/E": sector_pe,
         "Market Cap": f"{int(overview_response.get('MarketCapitalization', '0')):,}" if overview_response.get("MarketCapitalization") else "N/A",
         "Revenue": f"{int(latest_income.get('totalRevenue', '0')):,}" if latest_income.get("totalRevenue") else "N/A",
@@ -58,6 +58,22 @@ def fetch_fundamental_data(ticker):
     
     return fundamental_data
 
+# Function to Fetch FMP's Sector & Industry Classification
+def fetch_fmp_sector(ticker):
+    """Fetch the correct sector & industry for a given stock from FMP."""
+    url = f"https://financialmodelingprep.com/api/v3/profile/{ticker}?apikey={FMP_API_KEY}"
+    
+    response = requests.get(url)
+    
+    if response.status_code == 200:
+        data = response.json()
+        if data and isinstance(data, list):
+            sector = data[0].get("sector", "N/A")
+            industry = data[0].get("industry", "N/A")
+            return sector, industry
+
+    return "N/A", "N/A"
+
 # Function to Fetch Sector P/E Ratio from FMP
 def fetch_sector_pe_ratio(sector):
     """Fetch the P/E ratio for a given sector from FMP API with the required date parameter."""
@@ -67,89 +83,21 @@ def fetch_sector_pe_ratio(sector):
 
     try:
         response = requests.get(url)
-        response.raise_for_status()  # Raise exception if request fails
+        response.raise_for_status()
         data = response.json()
 
         if not data:
-            print("❌ No data returned from FMP API!")
             return "N/A"
 
-        # Create a dictionary of sector P/E ratios
         sector_pe_dict = {entry["sector"]: entry["pe"] for entry in data}
 
-        # Try direct match first
         if sector in sector_pe_dict:
             return sector_pe_dict[sector]
 
-        # Try mapped sector name (adjust based on actual API output)
-        SECTOR_NAME_MAP = {
-            "Consumer Cyclical": "Consumer Discretionary",
-            "Financial Services": "Financials",
-            "Technology": "Information Technology"
-        }
-        mapped_sector = SECTOR_NAME_MAP.get(sector, None)
-
-        if mapped_sector and mapped_sector in sector_pe_dict:
-            return sector_pe_dict[mapped_sector]
-
         return "N/A"
 
-    except requests.exceptions.RequestException as e:
-        print(f"❌ API Request Error: {e}")
+    except requests.exceptions.RequestException:
         return "N/A"
-
-# Function to Analyze Stock Data with OpenAI GPT-4
-def analyze_with_gpt(fundamental_data):
-    client = openai.OpenAI(api_key=OPENAI_API_KEY)
-
-    prompt = f"""
-    You are a financial analyst evaluating the stock {fundamental_data['Ticker']} ({fundamental_data['Company Name']}). 
-
-    Based on the following fundamental data, summarize the company's financial health and investment potential:
-
-    - Sector: {fundamental_data['Sector']}
-    - Industry: {fundamental_data['Industry']}
-    - Sector Average P/E Ratio: {fundamental_data['Sector P/E']}
-    - Stock P/E Ratio: {fundamental_data['P/E Ratio']}
-    - Market Cap: {fundamental_data['Market Cap']}
-    - Revenue: {fundamental_data['Revenue']}
-    - Net Income: {fundamental_data['Net Income']}
-    - Total Assets: {fundamental_data['Total Assets']}
-    - Total Liabilities: {fundamental_data['Total Liabilities']}
-    - EPS: {fundamental_data['EPS']}
-    - Debt/Equity Ratio: {fundamental_data['Debt/Equity Ratio']}
-    - ROE: {fundamental_data['ROE']}
-    - ROA: {fundamental_data['ROA']}
-
-    - Compare the stock’s P/E ratio to its **sector average P/E** to determine if it is **undervalued or overvalued.**
-    - Apply a **discount (10-20%) if the stock appears overvalued.**
-    
-    Format the output as:
-
-    **Key Takeaways:**  
-    - (Insight 1)  
-    - (Insight 2)  
-    - (Insight 3)  
-
-    **Target Entry Point: $XXX.XX** (on its own line)
-    """
-
-    response = client.chat.completions.create(
-        model="gpt-4",
-        messages=[
-            {"role": "system", "content": "You are a professional stock analyst. Ensure the response is structured clearly with 'Key Takeaways' first and 'Target Entry Point' at the end."},
-            {"role": "user", "content": prompt}
-        ]
-    )
-
-    full_response = response.choices[0].message.content
-
-    # Extract "Key Takeaways" and "Target Entry Point"
-    takeaways_part = full_response.split("Target Entry Point:")[0].strip()
-    target_price_match = re.search(r"Target Entry Point: \$(\d+\.\d+)", full_response)
-    target_price = target_price_match.group(0) if target_price_match else "Not Available"
-
-    return takeaways_part, target_price
 
 # Streamlit UI - Enhanced Layout
 st.set_page_config(page_title="AI Stock Screener", page_icon="📈", layout="centered")
@@ -166,16 +114,6 @@ if st.button("Analyze Stock"):
 
             st.subheader("🏦 Fundamental Data Summary")
             st.dataframe(pd.DataFrame(data.items(), columns=["Metric", "Value"]))
-
-            with st.spinner("Running AI analysis..."):
-                analysis, target_price = analyze_with_gpt(data)
-
-                st.subheader("🤖 AI Analysis")
-                st.success("### Key Takeaways")
-                st.write(analysis)
-
-                st.subheader("🎯 Target Entry Point")
-                st.warning(target_price)
 
     else:
         st.error("❌ Please enter a valid stock ticker.")
