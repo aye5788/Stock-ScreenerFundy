@@ -1,1 +1,6 @@
+streamlit
+openai
+alpha_vantage
+requests
+pandas
 
