@@ -55,7 +55,7 @@ def analyze_with_gpt(fundamental_data):
 
     prompt = f"""
     You are a financial analyst evaluating the stock {fundamental_data['Ticker']} ({fundamental_data['Company Name']}).
-    
+
     Based on the following fundamental data, summarize the company's financial health and investment potential in 3-5 bullet points:
 
     - Market Cap: {fundamental_data['Market Cap']}
@@ -68,35 +68,36 @@ def analyze_with_gpt(fundamental_data):
     - Debt/Equity Ratio: {fundamental_data['Debt/Equity Ratio']}
     - ROE: {fundamental_data['ROE']}
     - ROA: {fundamental_data['ROA']}
-    
-    Additionally, provide a **target buy price** based on valuation metrics such as:
-    - Comparing the current P/E ratio to a reasonable range (e.g., 15-25).
-    - Calculating a fair value estimate based on EPS and a reasonable P/E.
-    - Applying a discount of 10-20% to ensure a margin of safety.
 
-    **Format the target buy price as: "Target Entry Point: $XXX.XX" on its own line.**
-    Return the response in **plain text with NO markdown formatting (no asterisks, no underscores, no extra spaces).**
+    - Use Tesla's actual historical P/E range (~50-100) to estimate fair value.
+    - Apply a **discount (10-20%) ONLY IF it results in a logical entry price.**
+    
+    Format the output as:
+
+    **Key Takeaways:**  
+    - (Insight 1)  
+    - (Insight 2)  
+    - (Insight 3)  
+
+    **Target Entry Point: $XXX.XX** (on its own line)
     """
 
     response = client.chat.completions.create(
         model="gpt-4",
         messages=[
-            {"role": "system", "content": "You are a professional stock analyst. Ensure the response is in plain text without markdown formatting or disclaimers."},
+            {"role": "system", "content": "You are a professional stock analyst. Ensure the response is structured clearly with 'Key Takeaways' first and 'Target Entry Point' at the end."},
             {"role": "user", "content": prompt}
         ]
     )
 
-    raw_response = response.choices[0].message.content
+    full_response = response.choices[0].message.content
 
-    # 🔥 Ensure AI response is clean
-    clean_response = re.sub(r'[_*]', '', raw_response)  # Remove markdown formatting
-    clean_response = clean_response.replace("\n", " ")  # Remove unnecessary line breaks
-
-    # Extract the target buy price
-    target_price_match = re.search(r'Target Entry Point: \$(\d+\.\d+)', clean_response)
+    # 🔍 Separate "Key Takeaways" and "Target Entry Point"
+    takeaways_part = full_response.split("Target Entry Point:")[0].strip()
+    target_price_match = re.search(r"Target Entry Point: \$(\d+\.\d+)", full_response)
     target_price = target_price_match.group(0) if target_price_match else "Not Available"
 
-    return clean_response.strip(), target_price  # Return analysis + price
+    return takeaways_part, target_price  # Ensure both sections are extracted properly
 
 # 🎨 Streamlit UI - Enhanced Layout
 st.set_page_config(page_title="AI Stock Screener", page_icon="📈", layout="centered")
@@ -135,4 +136,3 @@ if st.button("Analyze Stock"):
 
     else:
         st.error("❌ Please enter a valid stock ticker.")
-
