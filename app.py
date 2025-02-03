@@ -99,6 +99,56 @@ def fetch_sector_pe_ratio(sector):
     except requests.exceptions.RequestException:
         return "N/A"
 
+# Function to Analyze Stock Data with OpenAI GPT-4
+def analyze_with_gpt(fundamental_data):
+    client = openai.OpenAI(api_key=OPENAI_API_KEY)
+
+    prompt = f"""
+    You are a financial analyst evaluating the stock {fundamental_data['Ticker']} ({fundamental_data['Company Name']}).
+
+    Based on the following fundamental data, summarize the company's financial health and investment potential:
+
+    - Sector: {fundamental_data['Sector']}
+    - Sector Average P/E Ratio: {fundamental_data['Sector P/E']}
+    - Stock P/E Ratio: {fundamental_data['P/E Ratio']}
+    - Market Cap: {fundamental_data['Market Cap']}
+    - Revenue: {fundamental_data['Revenue']}
+    - Net Income: {fundamental_data['Net Income']}
+    - Total Assets: {fundamental_data['Total Assets']}
+    - Total Liabilities: {fundamental_data['Total Liabilities']}
+    - EPS: {fundamental_data['EPS']}
+    - Debt/Equity Ratio: {fundamental_data['Debt/Equity Ratio']}
+    - ROE: {fundamental_data['ROE']}
+    - ROA: {fundamental_data['ROA']}
+
+    - Compare the stock’s P/E ratio to its **sector average P/E** to determine if it is **undervalued or overvalued.**
+    - Apply a **discount (10-20%) if the stock appears overvalued.**
+    
+    Format the output as:
+
+    **Key Takeaways:**  
+    - (Insight 1)  
+    - (Insight 2)  
+    - (Insight 3)  
+
+    **Target Entry Point: $XXX.XX** (on its own line)
+    """
+
+    response = client.chat.completions.create(
+        model="gpt-4",
+        messages=[{"role": "system", "content": "You are a professional stock analyst. Ensure the response is structured clearly with 'Key Takeaways' first and 'Target Entry Point' at the end."},
+                  {"role": "user", "content": prompt}]
+    )
+
+    full_response = response.choices[0].message.content
+
+    # Extract "Key Takeaways" and "Target Entry Point"
+    takeaways_part = full_response.split("Target Entry Point:")[0].strip()
+    target_price_match = re.search(r"Target Entry Point: \$(\d+\.\d+)", full_response)
+    target_price = target_price_match.group(0) if target_price_match else "Not Available"
+
+    return takeaways_part, target_price
+
 # Streamlit UI - Enhanced Layout
 st.set_page_config(page_title="AI Stock Screener", page_icon="📈", layout="centered")
 st.title("📊 AI-Powered Stock Screener")
@@ -114,6 +164,18 @@ if st.button("Analyze Stock"):
 
             st.subheader("🏦 Fundamental Data Summary")
             st.dataframe(pd.DataFrame(data.items(), columns=["Metric", "Value"]))
+
+            with st.spinner("Running AI analysis..."):
+                analysis, target_price = analyze_with_gpt(data)
+
+                st.subheader("🤖 AI Analysis")
+                st.success("### Key Takeaways")
+                for line in analysis.split("\n"):
+                    if line.strip():
+                        st.write(f"🔹 {line}")
+
+                st.subheader("🎯 Target Entry Point")
+                st.warning(target_price)
 
     else:
         st.error("❌ Please enter a valid stock ticker.")
