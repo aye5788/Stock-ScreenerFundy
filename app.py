@@ -4,15 +4,15 @@ import openai
 import pandas as pd
 from datetime import datetime
 
-# **Load API Keys from Streamlit Secrets**
-FMP_API_KEY = st.secrets["FMP_API_KEY"]  # ✅ Keep using FMP for company profile & sector P/E
-ALPHA_VANTAGE_API_KEY = st.secrets["ALPHA_VANTAGE_API_KEY"] 
-OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]  # ✅ Keep using OpenAI for AI Analysis
+# **Load API Keys Correctly**
+FMP_API_KEY = st.secrets["FMP_API_KEY"]  # ✅ Used for Company Profile & Sector P/E
+AV_API_KEY = st.secrets["ALPHA_VANTAGE_API_KEY"]  # ✅ Used for Fundamental Data from AV
+OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]  # ✅ Used for AI analysis
 
-# **Initialize OpenAI client (Fix for API issue)**
+# **Initialize OpenAI client**
 client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
-# **Format Large Numbers (NO CHANGE)**
+# **Format Large Numbers**
 def format_large_number(value):
     try:
         value = float(value)
@@ -24,7 +24,7 @@ def format_large_number(value):
     except (ValueError, TypeError):
         return "N/A"
 
-# **Fetch Company Profile (Sector, Industry, Company Name) from FMP (NO CHANGE)**
+# **Fetch Company Profile from FMP**
 def fetch_company_profile(ticker):
     url = f"https://financialmodelingprep.com/api/v3/profile/{ticker}?apikey={FMP_API_KEY}"
     response = requests.get(url).json()
@@ -38,9 +38,9 @@ def fetch_company_profile(ticker):
         }
     return None
 
-# **Fetch Fundamental Data from Alpha Vantage (NO CHANGE)**
+# **Fetch Fundamental Data from Alpha Vantage (Corrected AV Endpoint)**
 def fetch_fundamental_data(ticker):
-    url = f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={ticker}&apikey={ALPHA_VANTAGE_API_KEY}"
+    url = f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={ticker}&apikey={AV_API_KEY}"
     response = requests.get(url).json()
     if "Symbol" not in response:
         return None
@@ -53,7 +53,7 @@ def fetch_fundamental_data(ticker):
         "P/E Ratio": response.get("PERatio", "N/A")
     }
 
-# **Fetch Sector P/E from FMP (NO CHANGE)**
+# **Fetch Sector P/E from FMP**
 def fetch_sector_pe(sector):
     url = f"https://financialmodelingprep.com/api/v4/sector_price_earning_ratio?date={datetime.today().strftime('%Y-%m-%d')}&exchange=NYSE&apikey={FMP_API_KEY}"
     response = requests.get(url).json()
@@ -62,7 +62,7 @@ def fetch_sector_pe(sector):
             return entry["pe"]
     return "N/A"
 
-# **Generate AI Analysis (FIXED OpenAI API CALL)**
+# **Generate AI Analysis**
 def generate_ai_analysis(data):
     prompt = f"""
     Analyze the following fundamental data for {data['Company Name']} ({data['Ticker']}):
@@ -81,7 +81,6 @@ def generate_ai_analysis(data):
     Provide an investment analysis and estimate a fair value price.
     """
 
-    # **Fix for OpenAI API call (use updated method)**
     response = client.chat.completions.create(
         model="gpt-4",
         messages=[{"role": "user", "content": prompt}]
@@ -89,7 +88,7 @@ def generate_ai_analysis(data):
 
     return response.choices[0].message.content
 
-# **Streamlit UI (NO CHANGE)**
+# **Streamlit UI**
 st.title("📈 AI-Powered Stock Screener")
 st.write("Enter a stock ticker below to get AI-powered fundamental analysis and a fair value estimate.")
 
@@ -116,4 +115,5 @@ if st.button("Analyze Stock"):
                 ai_analysis = generate_ai_analysis(data)
                 st.subheader("🤖 AI Analysis")
                 st.markdown(f"<div style='background-color: #e8f5e9; padding: 10px; border-radius: 5px;'>{ai_analysis}</div>", unsafe_allow_html=True)
+
 
