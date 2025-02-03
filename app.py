@@ -31,7 +31,7 @@ def fetch_fundamental_data(ticker):
     shareholder_equity = total_assets - total_liabilities if total_assets and total_liabilities else None
     debt_equity_ratio = total_liabilities / shareholder_equity if shareholder_equity else "N/A"
 
-    # Convert all numeric values to strings for table display
+    # Convert numbers into clean format before sending to OpenAI
     fundamental_data = {
         "Ticker": ticker,
         "Company Name": overview_response.get("Name", "N/A"),
@@ -45,7 +45,6 @@ def fetch_fundamental_data(ticker):
         "Debt/Equity Ratio": str(round(debt_equity_ratio, 2)) if debt_equity_ratio != "N/A" else "N/A",
         "ROE": overview_response.get("ReturnOnEquityTTM", "N/A"),
         "ROA": overview_response.get("ReturnOnAssetsTTM", "N/A"),
-        "Current Price": overview_response.get("AnalystTargetPrice", "N/A"),  # If available
     }
     
     return fundamental_data
@@ -75,8 +74,8 @@ def analyze_with_gpt(fundamental_data):
     - Calculating a fair value estimate based on EPS and a reasonable P/E.
     - Applying a discount of 10-20% to ensure a margin of safety.
 
-    Return the response in **plain text with NO markdown formatting (no asterisks, no underscores)**.
-    Avoid adding disclaimers—only return the analysis and target buy price.
+    **Format the target buy price as: "Target Entry Point: $XXX.XX" on its own line.**
+    Return the response in **plain text with NO markdown formatting (no asterisks, no underscores, no extra spaces).**
     """
 
     response = client.chat.completions.create(
@@ -89,10 +88,15 @@ def analyze_with_gpt(fundamental_data):
 
     raw_response = response.choices[0].message.content
 
-    # 🔥 Regex to remove markdown formatting (fixes the weird font issue)
-    clean_response = re.sub(r'[_*]', '', raw_response)  # Remove * and _ formatting
+    # 🔥 Ensure AI response is clean
+    clean_response = re.sub(r'[_*]', '', raw_response)  # Remove markdown formatting
+    clean_response = clean_response.replace("\n", " ")  # Remove unnecessary line breaks
 
-    return clean_response.strip()  # Ensure no extra whitespace
+    # Extract the target buy price
+    target_price_match = re.search(r'Target Entry Point: \$(\d+\.\d+)', clean_response)
+    target_price = target_price_match.group(0) if target_price_match else "Not Available"
+
+    return clean_response.strip(), target_price  # Return analysis + price
 
 # 🎨 Streamlit UI - Enhanced Layout
 st.set_page_config(page_title="AI Stock Screener", page_icon="📈", layout="centered")
@@ -107,23 +111,27 @@ if st.button("Analyze Stock"):
         with st.spinner("Fetching data..."):
             data = fetch_fundamental_data(ticker)
 
+            # ✅ Debugging: Show raw data before sending to AI
+            st.subheader("🔍 Debugging: Raw Data Sent to AI")
+            st.json(data)
+
             # ✅ Display Financial Data in a Clean Table
             st.subheader("🏦 Fundamental Data Summary")
             st.dataframe(pd.DataFrame(data.items(), columns=["Metric", "Value"]))
 
             with st.spinner("Running AI analysis..."):
-                analysis = analyze_with_gpt(data)
+                analysis, target_price = analyze_with_gpt(data)
 
-                # 🎯 AI Analysis with Target Buy Price
+                # 🎯 AI Analysis with Cleaned Text
                 st.subheader("🤖 AI Analysis")
                 st.success("### Key Takeaways")
-
                 for line in analysis.split("\n"):
-                    if line.strip():
-                        if "Target Buy Price" in line:
-                            st.warning(f"🎯 {line}")  # Highlight target buy price
-                        else:
-                            st.write(f"🔹 {line}")
+                    if line.strip() and "Target Entry Point" not in line:
+                        st.write(f"🔹 {line}")
+
+                # 🎯 Separate Section for Target Entry Point
+                st.subheader("🎯 Target Entry Point")
+                st.warning(target_price)
 
     else:
         st.error("❌ Please enter a valid stock ticker.")
