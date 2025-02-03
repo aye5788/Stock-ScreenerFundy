@@ -16,11 +16,11 @@ def fetch_fundamental_data(ticker):
     # Fetch Company Overview from Alpha Vantage
     overview_response = requests.get(f"{base_url_av}?function=OVERVIEW&symbol={ticker}&apikey={AV_API_KEY}").json()
     
-    # Extract Correct **Sector**
-    company_sector = overview_response.get("Sector", "N/A")
+    # Fetch Correct Sector from FMP (Overrides Alpha Vantage's Incorrect One)
+    fmp_sector, fmp_industry = fetch_fmp_sector(ticker)
 
     # Fetch Sector P/E Ratio from FMP
-    sector_pe = fetch_sector_pe_ratio(company_sector)
+    sector_pe = fetch_sector_pe_ratio(fmp_sector)
 
     # Fetch Income & Balance Sheet Data
     income_response = requests.get(f"{base_url_av}?function=INCOME_STATEMENT&symbol={ticker}&apikey={AV_API_KEY}").json()
@@ -40,7 +40,8 @@ def fetch_fundamental_data(ticker):
     fundamental_data = {
         "Ticker": ticker,
         "Company Name": overview_response.get("Name", "N/A"),
-        "Sector": company_sector,
+        "Sector": fmp_sector,
+        "Industry": fmp_industry,
         "Sector P/E": sector_pe,
         "Market Cap": f"{int(overview_response.get('MarketCapitalization', '0')):,}" if overview_response.get("MarketCapitalization") else "N/A",
         "Revenue": f"{int(latest_income.get('totalRevenue', '0')):,}" if latest_income.get("totalRevenue") else "N/A",
@@ -56,17 +57,31 @@ def fetch_fundamental_data(ticker):
     
     return fundamental_data
 
-# Function to Fetch Sector P/E Ratio from FMP
+# Fetch Sector Classification from FMP
+def fetch_fmp_sector(ticker):
+    url = f"https://financialmodelingprep.com/api/v3/profile/{ticker}?apikey={FMP_API_KEY}"
+    
+    response = requests.get(url)
+    
+    if response.status_code == 200:
+        data = response.json()
+        if data and isinstance(data, list):
+            return data[0].get("sector", "N/A"), data[0].get("industry", "N/A")
+    
+    return "N/A", "N/A"
+
+# Fetch Sector P/E Ratio from FMP
 def fetch_sector_pe_ratio(sector):
-    base_url_fmp = "https://financialmodelingprep.com/api/v4/sectors-pe-ratio"
-
-    response = requests.get(f"{base_url_fmp}?apikey={FMP_API_KEY}").json()
-
-    # Search for Matching Sector in FMP Response
-    for entry in response:
-        if entry.get("sector") == sector:
-            return entry.get("pe", "N/A")
-
+    url = f"https://financialmodelingprep.com/api/v4/sector_price_earning_ratio?exchange=NYSE&apikey={FMP_API_KEY}"
+    
+    response = requests.get(url)
+    
+    if response.status_code == 200:
+        data = response.json()
+        for entry in data:
+            if entry["sector"] == sector:
+                return entry["pe"]
+    
     return "N/A"  # If sector not found, return "N/A"
 
 # Function to Analyze Stock Data with OpenAI GPT-4
@@ -151,4 +166,3 @@ if st.button("Analyze Stock"):
 
     else:
         st.error("❌ Please enter a valid stock ticker.")
-
