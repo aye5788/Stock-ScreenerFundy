@@ -3,12 +3,25 @@ import openai
 import requests
 import pandas as pd
 import re
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # Load API Keys from Streamlit Secrets
 AV_API_KEY = st.secrets["ALPHA_VANTAGE_API_KEY"]
 FMP_API_KEY = st.secrets["FMP_API_KEY"]
 OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
+
+# Function to Format Large Numbers to "B" or "M"
+def format_large_number(value):
+    try:
+        value = float(value)
+        if value >= 1_000_000_000:
+            return f"{value / 1_000_000_000:.2f}B"
+        elif value >= 1_000_000:
+            return f"{value / 1_000_000:.2f}M"
+        else:
+            return f"{value:,}"  # Standard formatting for smaller numbers
+    except:
+        return "N/A"
 
 # Function to Fetch Stock Data from Alpha Vantage & Sector P/E from FMP
 def fetch_fundamental_data(ticker):
@@ -47,11 +60,11 @@ def fetch_fundamental_data(ticker):
         "Company Name": overview_response.get("Name", "N/A"),
         "Sector": company_sector,
         "Sector P/E": round(float(sector_pe), 2) if sector_pe != "N/A" else "N/A",
-        "Market Cap": f"{int(overview_response.get('MarketCapitalization', '0')):,}" if overview_response.get("MarketCapitalization") else "N/A",
-        "Revenue": f"{int(latest_income.get('totalRevenue', '0')):,}" if latest_income.get("totalRevenue") else "N/A",
-        "Net Income": f"{int(latest_income.get('netIncome', '0')):,}" if latest_income.get("netIncome") else "N/A",
-        "Total Assets": f"{int(total_assets):,}" if total_assets else "N/A",
-        "Total Liabilities": f"{int(total_liabilities):,}" if total_liabilities else "N/A",
+        "Market Cap": format_large_number(overview_response.get("MarketCapitalization", "0")),
+        "Revenue": format_large_number(latest_income.get("totalRevenue", "0")),
+        "Net Income": format_large_number(latest_income.get("netIncome", "0")),
+        "Total Assets": format_large_number(total_assets),
+        "Total Liabilities": format_large_number(total_liabilities),
         "P/E Ratio": overview_response.get("PERatio", "N/A"),
         "EPS": overview_response.get("EPS", "N/A"),
         "Debt/Equity Ratio": str(round(debt_equity_ratio, 2)) if debt_equity_ratio != "N/A" else "N/A",
@@ -64,8 +77,6 @@ def fetch_fundamental_data(ticker):
 # Function to Fetch Sector P/E Ratio from FMP
 def fetch_sector_pe_ratio(sector):
     base_url_fmp = "https://financialmodelingprep.com/api/v4/sector_price_earning_ratio"
-
-    # Use today's date for the request
     today_date = datetime.today().strftime('%Y-%m-%d')
 
     response = requests.get(f"{base_url_fmp}?date={today_date}&exchange=NYSE&apikey={FMP_API_KEY}")
@@ -106,7 +117,7 @@ def analyze_with_gpt(fundamental_data):
     - ROA: {fundamental_data['ROA']}
 
     - Compare the stock’s P/E ratio to its **sector average P/E** to determine if it is **undervalued or overvalued.**
-    - Apply a **discount (10-20%) if the stock appears overvalued.**
+    - If the stock is **overvalued**, calculate a **10-20% discount on the current price** to recommend a target entry price.
     
     Format the output as:
 
