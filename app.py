@@ -81,24 +81,31 @@ def analyze_with_gpt(fundamental_data):
 
     return response.choices[0].message.content
 
-# Streamlit UI
-st.title("📈 AI-Powered Stock Screener")
+# 🎨 Streamlit UI - Enhanced Layout
+st.set_page_config(page_title="AI Stock Screener", page_icon="📈", layout="centered")
+st.title("📊 AI-Powered Stock Screener")
 st.write("Enter a stock ticker below to get AI-generated fundamental analysis.")
 
 # User Input for Stock Ticker
-ticker = st.text_input("Enter a stock ticker (e.g., TSLA, AAPL):")
+ticker = st.text_input("🔎 Enter a stock ticker (e.g., TSLA, AAPL):", max_chars=10)
 
 if st.button("Analyze Stock"):
     if ticker:
         with st.spinner("Fetching data..."):
             data = fetch_fundamental_data(ticker)
-            st.write("### 🏦 Fundamental Analysis Report")
-            st.json(data)  # Display financial data in a structured format
-            
+
+            # ✅ Display Financial Data in a Clean Table
+            st.subheader("🏦 Fundamental Analysis Report")
+            st.table(pd.DataFrame(data.items(), columns=["Metric", "Value"]))
+
             with st.spinner("Running AI analysis..."):
                 analysis = analyze_with_gpt(data)
-                st.write("### 🤖 AI Analysis")
-                st.write(analysis)
+
+                # 🎯 AI Analysis with Cleaner Formatting
+                st.subheader("🤖 AI Analysis")
+                st.markdown(f"<p style='font-size:18px; text-align:justify;'>{analysis}</p>", unsafe_allow_html=True)
+
     else:
         st.error("❌ Please enter a valid stock ticker.")
+
 
