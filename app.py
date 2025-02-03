@@ -105,7 +105,7 @@ def determine_fair_value(fundamental_data):
     except:
         return "Not Available"
 
-# Analyze Stock Data with OpenAI GPT-4
+# Analyze Stock Data with OpenAI GPT-4 (Fix Formatting Issues)
 def analyze_with_gpt(fundamental_data):
     client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
@@ -124,18 +124,18 @@ def analyze_with_gpt(fundamental_data):
     - Debt/Equity Ratio: {fundamental_data['Debt/Equity Ratio']}
     - Fair Value Estimate: {fair_value}
 
-    Provide a brief analysis.
+    Provide a well-structured financial analysis **without using Markdown formatting**.
     """
 
     response = client.chat.completions.create(
         model="gpt-4",
         messages=[
-            {"role": "system", "content": "You are a professional stock analyst."},
+            {"role": "system", "content": "You are a professional stock analyst. Avoid using markdown formatting."},
             {"role": "user", "content": prompt}
         ]
     )
 
-    return response.choices[0].message.content, fair_value
+    return response.choices[0].message.content.replace("*", ""), fair_value
 
 # Streamlit UI
 st.set_page_config(page_title="AI Stock Screener", page_icon="📈", layout="centered")
@@ -157,7 +157,8 @@ if st.button("Analyze Stock"):
                 st.subheader("🤖 AI Analysis")
                 st.success(analysis)
                 st.subheader("💰 Fair Value Estimate")
-                st.warning(f"${fair_value}")
+                st.warning(f"${int(fair_value)}")  # Remove decimals
 
     else:
         st.error("❌ Please enter a valid stock ticker.")
+
