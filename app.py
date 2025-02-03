@@ -3,6 +3,7 @@ import requests
 import openai
 import difflib
 from datetime import datetime
+import pandas as pd
 
 # Load API Keys from Streamlit Secrets
 FMP_API_KEY = st.secrets["FMP_API_KEY"]
