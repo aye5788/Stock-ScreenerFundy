@@ -3,6 +3,7 @@ import openai
 import requests
 import pandas as pd
 import re
+from datetime import datetime
 
 # Load API Keys from Streamlit Secrets
 AV_API_KEY = st.secrets["ALPHA_VANTAGE_API_KEY"]
@@ -16,11 +17,11 @@ def fetch_fundamental_data(ticker):
     # Fetch Company Overview from Alpha Vantage
     overview_response = requests.get(f"{base_url_av}?function=OVERVIEW&symbol={ticker}&apikey={AV_API_KEY}").json()
     
-    # Fetch Correct Sector from FMP (Overrides Alpha Vantage's Incorrect One)
-    fmp_sector, fmp_industry = fetch_fmp_sector(ticker)
+    # Extract Correct **Sector**
+    company_sector = overview_response.get("Sector", "N/A")
 
-    # Fetch Sector P/E Ratio from FMP
-    sector_pe = fetch_sector_pe_ratio(fmp_sector)
+    # Fetch Sector P/E Ratio from FMP using the correct sector
+    sector_pe = fetch_sector_pe_ratio(company_sector)
 
     # Fetch Income & Balance Sheet Data
     income_response = requests.get(f"{base_url_av}?function=INCOME_STATEMENT&symbol={ticker}&apikey={AV_API_KEY}").json()
@@ -40,8 +41,8 @@ def fetch_fundamental_data(ticker):
     fundamental_data = {
         "Ticker": ticker,
         "Company Name": overview_response.get("Name", "N/A"),
-        "Sector": fmp_sector,
-        "Industry": fmp_industry,
+        "Sector": company_sector,
+        "Industry": overview_response.get("Industry", "N/A"),
         "Sector P/E": sector_pe,
         "Market Cap": f"{int(overview_response.get('MarketCapitalization', '0')):,}" if overview_response.get("MarketCapitalization") else "N/A",
         "Revenue": f"{int(latest_income.get('totalRevenue', '0')):,}" if latest_income.get("totalRevenue") else "N/A",
@@ -57,43 +58,57 @@ def fetch_fundamental_data(ticker):
     
     return fundamental_data
 
-# Fetch Sector Classification from FMP
-def fetch_fmp_sector(ticker):
-    url = f"https://financialmodelingprep.com/api/v3/profile/{ticker}?apikey={FMP_API_KEY}"
-    
-    response = requests.get(url)
-    
-    if response.status_code == 200:
-        data = response.json()
-        if data and isinstance(data, list):
-            return data[0].get("sector", "N/A"), data[0].get("industry", "N/A")
-    
-    return "N/A", "N/A"
-
-# Fetch Sector P/E Ratio from FMP
+# Function to Fetch Sector P/E Ratio from FMP
 def fetch_sector_pe_ratio(sector):
-    url = f"https://financialmodelingprep.com/api/v4/sector_price_earning_ratio?exchange=NYSE&apikey={FMP_API_KEY}"
-    
-    response = requests.get(url)
-    
-    if response.status_code == 200:
+    """Fetch the P/E ratio for a given sector from FMP API with the required date parameter."""
+    today_date = datetime.today().strftime('%Y-%m-%d')
+
+    url = f"https://financialmodelingprep.com/api/v4/sector_price_earning_ratio?date={today_date}&exchange=NYSE&apikey={FMP_API_KEY}"
+
+    try:
+        response = requests.get(url)
+        response.raise_for_status()  # Raise exception if request fails
         data = response.json()
-        for entry in data:
-            if entry["sector"] == sector:
-                return entry["pe"]
-    
-    return "N/A"  # If sector not found, return "N/A"
+
+        if not data:
+            print("❌ No data returned from FMP API!")
+            return "N/A"
+
+        # Create a dictionary of sector P/E ratios
+        sector_pe_dict = {entry["sector"]: entry["pe"] for entry in data}
+
+        # Try direct match first
+        if sector in sector_pe_dict:
+            return sector_pe_dict[sector]
+
+        # Try mapped sector name (adjust based on actual API output)
+        SECTOR_NAME_MAP = {
+            "Consumer Cyclical": "Consumer Discretionary",
+            "Financial Services": "Financials",
+            "Technology": "Information Technology"
+        }
+        mapped_sector = SECTOR_NAME_MAP.get(sector, None)
+
+        if mapped_sector and mapped_sector in sector_pe_dict:
+            return sector_pe_dict[mapped_sector]
+
+        return "N/A"
+
+    except requests.exceptions.RequestException as e:
+        print(f"❌ API Request Error: {e}")
+        return "N/A"
 
 # Function to Analyze Stock Data with OpenAI GPT-4
 def analyze_with_gpt(fundamental_data):
     client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
     prompt = f"""
-    You are a financial analyst evaluating the stock {fundamental_data['Ticker']} ({fundamental_data['Company Name']}).
+    You are a financial analyst evaluating the stock {fundamental_data['Ticker']} ({fundamental_data['Company Name']}). 
 
     Based on the following fundamental data, summarize the company's financial health and investment potential:
 
     - Sector: {fundamental_data['Sector']}
+    - Industry: {fundamental_data['Industry']}
     - Sector Average P/E Ratio: {fundamental_data['Sector P/E']}
     - Stock P/E Ratio: {fundamental_data['P/E Ratio']}
     - Market Cap: {fundamental_data['Market Cap']}
@@ -157,12 +172,11 @@ if st.button("Analyze Stock"):
 
                 st.subheader("🤖 AI Analysis")
                 st.success("### Key Takeaways")
-                for line in analysis.split("\n"):
-                    if line.strip():
-                        st.write(f"🔹 {line}")
+                st.write(analysis)
 
                 st.subheader("🎯 Target Entry Point")
                 st.warning(target_price)
 
     else:
         st.error("❌ Please enter a valid stock ticker.")
+
