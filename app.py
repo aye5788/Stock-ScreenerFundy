@@ -10,55 +10,37 @@ AV_API_KEY = st.secrets["ALPHA_VANTAGE_API_KEY"]
 FMP_API_KEY = st.secrets["FMP_API_KEY"]
 OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
 
-# Function to Format Large Numbers (e.g., 1,234,567,890 → "1.23B")
+# Function to Format Large Numbers
 def format_large_number(value):
     try:
         value = float(value)
-        if value >= 1_000_000_000:
-            return f"{value / 1_000_000_000:.2f}B"
-        elif value >= 1_000_000:
-            return f"{value / 1_000_000:.2f}M"
-        else:
-            return f"{value:,.0f}"
-    except (TypeError, ValueError):
-        return "N/A"
+        if value >= 1e12:
+            return f"{value / 1e12:.2f}T"
+        elif value >= 1e9:
+            return f"{value / 1e9:.2f}B"
+        elif value >= 1e6:
+            return f"{value / 1e6:.2f}M"
+        return f"{value:.2f}"
+    except:
+        return value
 
-# Function to Fetch Sector P/E Ratio from FMP
-def fetch_sector_pe_ratio(sector):
-    base_url_fmp = "https://financialmodelingprep.com/api/v4/sector_price_earning_ratio"
-    today_date = datetime.today().strftime('%Y-%m-%d')  # Required "YYYY-MM-DD" format
-
-    try:
-        response = requests.get(f"{base_url_fmp}?date={today_date}&apikey={FMP_API_KEY}")
-        data = response.json()
-
-        # Ensure case-insensitive sector matching
-        sector_upper = sector.strip().upper()
-        for entry in data:
-            if entry.get("sector", "").strip().upper() == sector_upper:
-                return round(float(entry.get("pe", "N/A")), 2)
-
-        print(f"❌ No Sector Match Found for {sector}, returning N/A")
-        return "N/A"
-
-    except Exception as e:
-        print(f"❌ Sector P/E API Request Failed: {str(e)}")
-        return "N/A"
-
-# Function to Fetch Stock Data from Alpha Vantage
+# Fetch Stock Data from Alpha Vantage & Sector P/E from FMP
 def fetch_fundamental_data(ticker):
     base_url_av = "https://www.alphavantage.co/query"
-
+    
     # Fetch Company Overview
     overview_response = requests.get(f"{base_url_av}?function=OVERVIEW&symbol={ticker}&apikey={AV_API_KEY}").json()
-    company_sector = overview_response.get("Sector", "N/A")
+    
+    # Extract Sector
+    company_sector = overview_response.get("Sector", "N/A").strip()
+
+    # Fetch Sector P/E Ratio
     sector_pe = fetch_sector_pe_ratio(company_sector)
 
-    # Fetch Income & Balance Sheet Data
+    # Fetch Financial Statements
     income_response = requests.get(f"{base_url_av}?function=INCOME_STATEMENT&symbol={ticker}&apikey={AV_API_KEY}").json()
     balance_response = requests.get(f"{base_url_av}?function=BALANCE_SHEET&symbol={ticker}&apikey={AV_API_KEY}").json()
 
-    # Extract Latest Reports
     latest_income = income_response.get("annualReports", [{}])[0]
     latest_balance = balance_response.get("annualReports", [{}])[0]
 
@@ -74,77 +56,91 @@ def fetch_fundamental_data(ticker):
         "Company Name": overview_response.get("Name", "N/A"),
         "Sector": company_sector,
         "Sector P/E": sector_pe,
-        "Market Cap": format_large_number(overview_response.get("MarketCapitalization", "N/A")),
-        "Revenue": format_large_number(latest_income.get("totalRevenue", "N/A")),
-        "Net Income": format_large_number(latest_income.get("netIncome", "N/A")),
+        "Market Cap": format_large_number(overview_response.get('MarketCapitalization', '0')),
+        "Revenue": format_large_number(latest_income.get('totalRevenue', '0')),
+        "Net Income": format_large_number(latest_income.get('netIncome', '0')),
         "Total Assets": format_large_number(total_assets),
         "Total Liabilities": format_large_number(total_liabilities),
         "P/E Ratio": overview_response.get("PERatio", "N/A"),
         "EPS": overview_response.get("EPS", "N/A"),
         "Debt/Equity Ratio": str(round(debt_equity_ratio, 2)) if debt_equity_ratio != "N/A" else "N/A",
-        "ROE": f"{float(overview_response.get('ReturnOnEquityTTM', 0)) * 100:.2f}%",
-        "ROA": f"{float(overview_response.get('ReturnOnAssetsTTM', 0)) * 100:.2f}%",
+        "ROE": overview_response.get("ReturnOnEquityTTM", "N/A"),
+        "ROA": overview_response.get("ReturnOnAssetsTTM", "N/A"),
     }
     
     return fundamental_data
 
-# Function to Estimate Fair Value Price
-def estimate_fair_value(fundamental_data):
-    pe_ratio = float(fundamental_data["P/E Ratio"]) if fundamental_data["P/E Ratio"] != "N/A" else None
-    sector_pe = float(fundamental_data["Sector P/E"]) if fundamental_data["Sector P/E"] != "N/A" else None
-    eps = float(fundamental_data["EPS"]) if fundamental_data["EPS"] != "N/A" else None
+# Fetch Sector P/E Ratio from FMP
+def fetch_sector_pe_ratio(sector):
+    base_url_fmp = "https://financialmodelingprep.com/api/v4/sector_price_earning_ratio"
+    today_date = datetime.today().strftime('%Y-%m-%d')
 
-    if pe_ratio and eps:
-        # Valuation based on Sector P/E
-        if sector_pe:
-            fair_value = round(sector_pe * eps, 2)
-        else:
-            fair_value = round(pe_ratio * eps, 2)
+    try:
+        response = requests.get(f"{base_url_fmp}?date={today_date}&exchange=NYSE&apikey={FMP_API_KEY}")
+        data = response.json()
 
-        return f"${fair_value:.2f}"
+        for entry in data:
+            if entry.get("sector", "").strip().upper() == sector.upper():
+                return round(float(entry.get("pe", "N/A")), 2)
 
-    return "N/A"
+        return "N/A"
+    except Exception as e:
+        return "N/A"
 
-# AI-Based Stock Analysis
-def analyze_with_gpt(fundamental_data, fair_value):
+# Determine Fair Value Price (Stable vs Growth)
+def determine_fair_value(fundamental_data):
+    pe_ratio = fundamental_data.get("P/E Ratio", "N/A")
+    eps = fundamental_data.get("EPS", "N/A")
+
+    try:
+        pe_ratio = float(pe_ratio)
+        eps = float(eps)
+
+        if pe_ratio < 20:  # Likely a stable company
+            fair_value = eps * 15  # Conservative multiple
+        else:  # Growth stock
+            fair_value = eps * 30  # Aggressive multiple
+
+        return round(fair_value, 2)
+    except:
+        return "Not Available"
+
+# Analyze Stock Data with OpenAI GPT-4
+def analyze_with_gpt(fundamental_data):
     client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
+    fair_value = determine_fair_value(fundamental_data)
+
     prompt = f"""
-    You are a financial analyst evaluating {fundamental_data['Ticker']} ({fundamental_data['Company Name']}).
-    
-    Based on these fundamentals, provide a summary:
+    You are a financial analyst evaluating {fundamental_data['Company Name']} ({fundamental_data['Ticker']}).
+
     - Sector: {fundamental_data['Sector']}
-    - Sector P/E: {fundamental_data['Sector P/E']}
-    - P/E Ratio: {fundamental_data['P/E Ratio']}
+    - Sector P/E Ratio: {fundamental_data['Sector P/E']}
+    - Stock P/E Ratio: {fundamental_data['P/E Ratio']}
     - Market Cap: {fundamental_data['Market Cap']}
     - Revenue: {fundamental_data['Revenue']}
     - Net Income: {fundamental_data['Net Income']}
     - EPS: {fundamental_data['EPS']}
     - Debt/Equity Ratio: {fundamental_data['Debt/Equity Ratio']}
-    - ROE: {fundamental_data['ROE']}
-    - ROA: {fundamental_data['ROA']}
-    - Fair Value Price: {fair_value}
+    - Fair Value Estimate: {fair_value}
 
-    Structure the response with:
-    - **Key Takeaways** (bullet points)
-    - **Fair Value Price: $XXX.XX** (on its own line)
+    Provide a brief analysis.
     """
 
     response = client.chat.completions.create(
         model="gpt-4",
         messages=[
-            {"role": "system", "content": "You are a financial analyst providing investment insights."},
+            {"role": "system", "content": "You are a professional stock analyst."},
             {"role": "user", "content": prompt}
         ]
     )
 
-    full_response = response.choices[0].message.content
-    return full_response
+    return response.choices[0].message.content, fair_value
 
 # Streamlit UI
 st.set_page_config(page_title="AI Stock Screener", page_icon="📈", layout="centered")
 st.title("📊 AI-Powered Stock Screener")
-st.write("Enter a stock ticker below to get AI-generated fundamental analysis and a recommended fair value price.")
+st.write("Enter a stock ticker to get fundamental analysis and a fair value price.")
 
 ticker = st.text_input("🔎 Enter a stock ticker (e.g., TSLA, AAPL):", max_chars=10)
 
@@ -152,19 +148,16 @@ if st.button("Analyze Stock"):
     if ticker:
         with st.spinner("Fetching data..."):
             data = fetch_fundamental_data(ticker)
-            fair_value = estimate_fair_value(data)
-
             st.subheader("🏦 Fundamental Data Summary")
             st.dataframe(pd.DataFrame(data.items(), columns=["Metric", "Value"]))
 
             with st.spinner("Running AI analysis..."):
-                analysis = analyze_with_gpt(data, fair_value)
+                analysis, fair_value = analyze_with_gpt(data)
 
                 st.subheader("🤖 AI Analysis")
                 st.success(analysis)
-
-            st.subheader("💰 Fair Value Estimate")
-            st.warning(fair_value if fair_value != "N/A" else "Not Available")
+                st.subheader("💰 Fair Value Estimate")
+                st.warning(f"${fair_value}")
 
     else:
         st.error("❌ Please enter a valid stock ticker.")
