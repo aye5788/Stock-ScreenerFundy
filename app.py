@@ -3,7 +3,7 @@ import openai
 import requests
 import pandas as pd
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Load API Keys from Streamlit Secrets
 AV_API_KEY = st.secrets["ALPHA_VANTAGE_API_KEY"]
@@ -17,8 +17,8 @@ def fetch_fundamental_data(ticker):
     # Fetch Company Overview from Alpha Vantage
     overview_response = requests.get(f"{base_url_av}?function=OVERVIEW&symbol={ticker}&apikey={AV_API_KEY}").json()
     
-    # Extract Correct **Sector** and **Industry** from FMP API
-    company_sector, company_industry = fetch_fmp_sector(ticker)
+    # Extract Correct **Sector**
+    company_sector = overview_response.get("Sector", "N/A")
 
     # Fetch Sector P/E Ratio from FMP
     sector_pe = fetch_sector_pe_ratio(company_sector)
@@ -37,17 +37,16 @@ def fetch_fundamental_data(ticker):
     shareholder_equity = total_assets - total_liabilities if total_assets and total_liabilities else None
     debt_equity_ratio = total_liabilities / shareholder_equity if shareholder_equity else "N/A"
 
-    # Convert ROE & ROA to percentages
-    roe_percentage = f"{float(overview_response.get('ReturnOnEquityTTM', '0')) * 100:.2f}%" if overview_response.get("ReturnOnEquityTTM") else "N/A"
-    roa_percentage = f"{float(overview_response.get('ReturnOnAssetsTTM', '0')) * 100:.2f}%" if overview_response.get("ReturnOnAssetsTTM") else "N/A"
+    # Convert ROE & ROA to Percentage Format
+    roe = float(overview_response.get("ReturnOnEquityTTM", "0")) * 100 if overview_response.get("ReturnOnEquityTTM") else None
+    roa = float(overview_response.get("ReturnOnAssetsTTM", "0")) * 100 if overview_response.get("ReturnOnAssetsTTM") else None
 
     # Format Data for Display
     fundamental_data = {
         "Ticker": ticker,
         "Company Name": overview_response.get("Name", "N/A"),
         "Sector": company_sector,
-        "Industry": company_industry,
-        "Sector P/E": sector_pe,
+        "Sector P/E": round(float(sector_pe), 2) if sector_pe != "N/A" else "N/A",
         "Market Cap": f"{int(overview_response.get('MarketCapitalization', '0')):,}" if overview_response.get("MarketCapitalization") else "N/A",
         "Revenue": f"{int(latest_income.get('totalRevenue', '0')):,}" if latest_income.get("totalRevenue") else "N/A",
         "Net Income": f"{int(latest_income.get('netIncome', '0')):,}" if latest_income.get("netIncome") else "N/A",
@@ -56,8 +55,8 @@ def fetch_fundamental_data(ticker):
         "P/E Ratio": overview_response.get("PERatio", "N/A"),
         "EPS": overview_response.get("EPS", "N/A"),
         "Debt/Equity Ratio": str(round(debt_equity_ratio, 2)) if debt_equity_ratio != "N/A" else "N/A",
-        "ROE": roe_percentage,
-        "ROA": roa_percentage,
+        "ROE": f"{round(roe, 2)}%" if roe else "N/A",
+        "ROA": f"{round(roa, 2)}%" if roa else "N/A",
     }
     
     return fundamental_data
@@ -65,28 +64,24 @@ def fetch_fundamental_data(ticker):
 # Function to Fetch Sector P/E Ratio from FMP
 def fetch_sector_pe_ratio(sector):
     base_url_fmp = "https://financialmodelingprep.com/api/v4/sector_price_earning_ratio"
-    current_date = datetime.today().strftime('%Y-%m-%d')
 
-    response = requests.get(f"{base_url_fmp}?date={current_date}&apikey={FMP_API_KEY}").json()
+    # Use today's date for the request
+    today_date = datetime.today().strftime('%Y-%m-%d')
 
-    # Search for Matching Sector in FMP Response
-    for entry in response:
-        if entry.get("sector") == sector:
+    response = requests.get(f"{base_url_fmp}?date={today_date}&exchange=NYSE&apikey={FMP_API_KEY}")
+
+    if response.status_code != 200:
+        print(f"❌ **Sector P/E API Request Failed! Status Code:** {response.status_code}")
+        return "N/A"
+
+    sector_pe_data = response.json()
+
+    # Search for the Matching Sector in API Response
+    for entry in sector_pe_data:
+        if entry.get("sector").lower() == sector.lower():
             return entry.get("pe", "N/A")
 
-    return "N/A"  # If sector not found, return "N/A"
-
-# Function to Fetch Correct Sector from FMP API
-def fetch_fmp_sector(ticker):
-    url = f"https://financialmodelingprep.com/api/v3/profile/{ticker}?apikey={FMP_API_KEY}"
-    response = requests.get(url)
-
-    if response.status_code == 200:
-        data = response.json()
-        if data and isinstance(data, list):
-            return data[0].get("sector", "N/A"), data[0].get("industry", "N/A")
-
-    return "N/A", "N/A"
+    return "N/A"
 
 # Function to Analyze Stock Data with OpenAI GPT-4
 def analyze_with_gpt(fundamental_data):
@@ -125,21 +120,20 @@ def analyze_with_gpt(fundamental_data):
 
     response = client.chat.completions.create(
         model="gpt-4",
-        messages=[{"role": "system", "content": "You are a professional stock analyst. Ensure the response is structured clearly with 'Key Takeaways' first and 'Target Entry Point' at the end."},
-                  {"role": "user", "content": prompt}]
+        messages=[{"role": "system", "content": "You are a professional stock analyst."}, {"role": "user", "content": prompt}]
     )
 
     full_response = response.choices[0].message.content
-    takeaways_part = full_response.split("Target Entry Point:")[0].strip()
-    target_price_match = re.search(r"Target Entry Point:\s*\$?(\d+\.\d{2})", full_response)
+
+    # Extract Target Entry Price
+    target_price_match = re.search(r"Target Entry Point: \$(\d+\.\d+)", full_response)
     target_price = target_price_match.group(0) if target_price_match else "Not Available"
 
-    return takeaways_part, target_price
+    return full_response, target_price
 
 # Streamlit UI
 st.set_page_config(page_title="AI Stock Screener", page_icon="📈", layout="centered")
 st.title("📊 AI-Powered Stock Screener")
-st.write("Enter a stock ticker below to get AI-generated fundamental analysis and a recommended buy price.")
 
 ticker = st.text_input("🔎 Enter a stock ticker (e.g., TSLA, AAPL):", max_chars=10)
 
@@ -147,14 +141,17 @@ if st.button("Analyze Stock"):
     if ticker:
         with st.spinner("Fetching data..."):
             data = fetch_fundamental_data(ticker)
+
             st.subheader("🏦 Fundamental Data Summary")
             st.dataframe(pd.DataFrame(data.items(), columns=["Metric", "Value"]))
 
             with st.spinner("Running AI analysis..."):
                 analysis, target_price = analyze_with_gpt(data)
+
                 st.subheader("🤖 AI Analysis")
-                st.success("### Key Takeaways")
-                st.write(analysis)
+                st.success(analysis)
+
                 st.subheader("🎯 Target Entry Point")
                 st.warning(target_price)
-
+    else:
+        st.error("❌ Please enter a valid stock ticker.")
