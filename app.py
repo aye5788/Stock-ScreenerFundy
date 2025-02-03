@@ -2,6 +2,7 @@ import streamlit as st
 import openai
 import requests
 import pandas as pd
+import re  # 🔥 Import regex for proper text cleanup
 
 # Access API Keys Securely from Streamlit Secrets
 AV_API_KEY = st.secrets["ALPHA_VANTAGE_API_KEY"]
@@ -85,7 +86,12 @@ def analyze_with_gpt(fundamental_data):
         ]
     )
 
-    return response.choices[0].message.content
+    raw_response = response.choices[0].message.content
+
+    # 🔥 Regex to remove markdown formatting (fixes the weird font issue)
+    clean_response = re.sub(r'[_*]', '', raw_response)  # Remove * and _ formatting
+
+    return clean_response
 
 # 🎨 Streamlit UI - Enhanced Layout
 st.set_page_config(page_title="AI Stock Screener", page_icon="📈", layout="centered")
@@ -110,11 +116,8 @@ if st.button("Analyze Stock"):
                 # 🎯 AI Analysis with Target Buy Price
                 st.subheader("🤖 AI Analysis")
                 st.success("### Key Takeaways")
-                
-                # **Ensure text is displayed in a normal font**
-                clean_text = analysis.replace("_", "").replace("*", "")  
 
-                for line in clean_text.split("\n"):
+                for line in analysis.split("\n"):
                     if line.strip():
                         if "Target Buy Price" in line:
                             st.warning(f"🎯 {line}")  # Highlight target buy price
