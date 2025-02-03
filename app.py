@@ -44,6 +44,7 @@ def fetch_fundamental_data(ticker):
         "Debt/Equity Ratio": str(round(debt_equity_ratio, 2)) if debt_equity_ratio != "N/A" else "N/A",
         "ROE": str(overview_response.get("ReturnOnEquityTTM", "N/A")),
         "ROA": str(overview_response.get("ReturnOnAssetsTTM", "N/A")),
+        "Current Price": str(overview_response.get("AnalystTargetPrice", "N/A")),  # If available
     }
     
     return fundamental_data
@@ -56,7 +57,7 @@ def analyze_with_gpt(fundamental_data):
     You are a financial analyst evaluating the stock {fundamental_data['Ticker']} ({fundamental_data['Company Name']}).
     
     Based on the following fundamental data, summarize the company's financial health and investment potential in 3-5 bullet points:
-    
+
     - Market Cap: {fundamental_data['Market Cap']}
     - Revenue: {fundamental_data['Revenue']}
     - Net Income: {fundamental_data['Net Income']}
@@ -68,7 +69,12 @@ def analyze_with_gpt(fundamental_data):
     - ROE: {fundamental_data['ROE']}
     - ROA: {fundamental_data['ROA']}
     
-    Provide a final rating from 1-5 and a brief investment outlook.
+    Additionally, provide a **target buy price** based on valuation metrics such as:
+    - Comparing the current P/E ratio to a reasonable range (e.g., 15-25).
+    - Calculating a fair value estimate based on EPS and a reasonable P/E.
+    - Applying a discount of 10-20% to ensure a margin of safety.
+
+    Provide a **final rating from 1-5** and a brief investment outlook.
     """
 
     response = client.chat.completions.create(
@@ -84,7 +90,7 @@ def analyze_with_gpt(fundamental_data):
 # 🎨 Streamlit UI - Enhanced Layout
 st.set_page_config(page_title="AI Stock Screener", page_icon="📈", layout="centered")
 st.title("📊 AI-Powered Stock Screener")
-st.write("Enter a stock ticker below to get AI-generated fundamental analysis.")
+st.write("Enter a stock ticker below to get AI-generated fundamental analysis and a recommended buy price.")
 
 # User Input for Stock Ticker
 ticker = st.text_input("🔎 Enter a stock ticker (e.g., TSLA, AAPL):", max_chars=10)
@@ -101,12 +107,16 @@ if st.button("Analyze Stock"):
             with st.spinner("Running AI analysis..."):
                 analysis = analyze_with_gpt(data)
 
-                # 🎯 AI Analysis with Cleaner Formatting
+                # 🎯 AI Analysis with Target Buy Price
                 st.subheader("🤖 AI Analysis")
                 st.success("### Key Takeaways")
                 for line in analysis.split("\n"):
                     if line.strip():
-                        st.write(f"🔹 {line}")
+                        if "Target Buy Price" in line:
+                            st.warning(f"🎯 {line}")  # Highlight target buy price
+                        else:
+                            st.write(f"🔹 {line}")
 
     else:
         st.error("❌ Please enter a valid stock ticker.")
+
