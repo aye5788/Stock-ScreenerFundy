@@ -2,7 +2,7 @@ import streamlit as st
 import openai
 import requests
 import pandas as pd
-import re  # 🔥 Import regex for proper text cleanup
+import re  # Import regex for text cleanup
 
 # Access API Keys Securely from Streamlit Secrets
 AV_API_KEY = st.secrets["ALPHA_VANTAGE_API_KEY"]
@@ -35,17 +35,17 @@ def fetch_fundamental_data(ticker):
     fundamental_data = {
         "Ticker": ticker,
         "Company Name": overview_response.get("Name", "N/A"),
-        "Market Cap": str(overview_response.get("MarketCapitalization", "N/A")),
-        "Revenue": str(latest_income.get("totalRevenue", "N/A")),
-        "Net Income": str(latest_income.get("netIncome", "N/A")),
-        "Total Assets": str(total_assets) if total_assets else "N/A",
-        "Total Liabilities": str(total_liabilities) if total_liabilities else "N/A",
-        "P/E Ratio": str(overview_response.get("PERatio", "N/A")),
-        "EPS": str(overview_response.get("EPS", "N/A")),
+        "Market Cap": f"{int(overview_response.get('MarketCapitalization', '0')):,}" if overview_response.get("MarketCapitalization") else "N/A",
+        "Revenue": f"{int(latest_income.get('totalRevenue', '0')):,}" if latest_income.get("totalRevenue") else "N/A",
+        "Net Income": f"{int(latest_income.get('netIncome', '0')):,}" if latest_income.get("netIncome") else "N/A",
+        "Total Assets": f"{int(total_assets):,}" if total_assets else "N/A",
+        "Total Liabilities": f"{int(total_liabilities):,}" if total_liabilities else "N/A",
+        "P/E Ratio": overview_response.get("PERatio", "N/A"),
+        "EPS": overview_response.get("EPS", "N/A"),
         "Debt/Equity Ratio": str(round(debt_equity_ratio, 2)) if debt_equity_ratio != "N/A" else "N/A",
-        "ROE": str(overview_response.get("ReturnOnEquityTTM", "N/A")),
-        "ROA": str(overview_response.get("ReturnOnAssetsTTM", "N/A")),
-        "Current Price": str(overview_response.get("AnalystTargetPrice", "N/A")),  # If available
+        "ROE": overview_response.get("ReturnOnEquityTTM", "N/A"),
+        "ROA": overview_response.get("ReturnOnAssetsTTM", "N/A"),
+        "Current Price": overview_response.get("AnalystTargetPrice", "N/A"),  # If available
     }
     
     return fundamental_data
@@ -75,13 +75,14 @@ def analyze_with_gpt(fundamental_data):
     - Calculating a fair value estimate based on EPS and a reasonable P/E.
     - Applying a discount of 10-20% to ensure a margin of safety.
 
-    **Return the response in plain text. Avoid using markdown formatting like underscores or asterisks.**
+    Return the response in **plain text with NO markdown formatting (no asterisks, no underscores)**.
+    Avoid adding disclaimers—only return the analysis and target buy price.
     """
 
     response = client.chat.completions.create(
         model="gpt-4",
         messages=[
-            {"role": "system", "content": "You are a professional stock analyst. Ensure the response is in plain text without markdown formatting."},
+            {"role": "system", "content": "You are a professional stock analyst. Ensure the response is in plain text without markdown formatting or disclaimers."},
             {"role": "user", "content": prompt}
         ]
     )
@@ -91,7 +92,7 @@ def analyze_with_gpt(fundamental_data):
     # 🔥 Regex to remove markdown formatting (fixes the weird font issue)
     clean_response = re.sub(r'[_*]', '', raw_response)  # Remove * and _ formatting
 
-    return clean_response
+    return clean_response.strip()  # Ensure no extra whitespace
 
 # 🎨 Streamlit UI - Enhanced Layout
 st.set_page_config(page_title="AI Stock Screener", page_icon="📈", layout="centered")
