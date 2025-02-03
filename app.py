@@ -4,10 +4,10 @@ import openai
 import pandas as pd
 from datetime import datetime
 
-# **Load API Keys Correctly**
-FMP_API_KEY = st.secrets["FMP_API_KEY"]  # ✅ Used for Company Profile & Sector P/E
-AV_API_KEY = st.secrets["ALPHA_VANTAGE_API_KEY"]  # ✅ Used for Fundamental Data from AV
-OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]  # ✅ Used for AI analysis
+# **Load API Keys**
+FMP_API_KEY = st.secrets["FMP_API_KEY"]  # ✅ Financial Modeling Prep for Company Profile & Sector P/E
+AV_API_KEY = st.secrets["ALPHA_VANTAGE_API_KEY"]  # ✅ Alpha Vantage for missing Fundamental Data
+OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]  # ✅ OpenAI for AI analysis
 
 # **Initialize OpenAI client**
 client = openai.OpenAI(api_key=OPENAI_API_KEY)
@@ -24,7 +24,7 @@ def format_large_number(value):
     except (ValueError, TypeError):
         return "N/A"
 
-# **Fetch Company Profile from FMP**
+# **Fetch Company Profile from FMP (Sector, Industry, Stock Price)**
 def fetch_company_profile(ticker):
     url = f"https://financialmodelingprep.com/api/v3/profile/{ticker}?apikey={FMP_API_KEY}"
     response = requests.get(url).json()
@@ -38,15 +38,11 @@ def fetch_company_profile(ticker):
         }
     return None
 
-# **Fetch Fundamental Data from Alpha Vantage (Corrected AV Endpoint)**
-def fetch_fundamental_data(ticker):
+# **Fetch ONLY Missing Fundamental Data from Alpha Vantage**
+def fetch_missing_fundamentals(ticker):
     url = f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={ticker}&apikey={AV_API_KEY}"
     response = requests.get(url).json()
-    if "Symbol" not in response:
-        return None
     return {
-        "Market Cap": format_large_number(response.get("MarketCapitalization", "N/A")),
-        "Revenue": format_large_number(response.get("RevenueTTM", "N/A")),
         "Net Income": format_large_number(response.get("NetIncomeTTM", "N/A")),
         "Total Assets": format_large_number(response.get("TotalAssets", "N/A")),
         "Total Liabilities": format_large_number(response.get("TotalLiabilities", "N/A")),
@@ -96,14 +92,14 @@ ticker = st.text_input("Enter a stock ticker (e.g., TSLA, AAPL):", value="AAPL")
 if st.button("Analyze Stock"):
     with st.spinner("Fetching data..."):
         company_profile = fetch_company_profile(ticker)
-        fundamental_data = fetch_fundamental_data(ticker)
+        missing_fundamentals = fetch_missing_fundamentals(ticker)
         sector_pe = fetch_sector_pe(company_profile["Sector"]) if company_profile else "N/A"
 
-        if company_profile and fundamental_data:
+        if company_profile:
             data = {
                 "Ticker": ticker,
                 **company_profile,
-                **fundamental_data,
+                **missing_fundamentals,
                 "Sector P/E": sector_pe
             }
 
@@ -111,9 +107,11 @@ if st.button("Analyze Stock"):
             st.subheader("📊 Fundamental Data Summary")
             st.dataframe(pd.DataFrame(data.items(), columns=["Metric", "Value"]))
 
+            # **Run AI Analysis**
             with st.spinner("Running AI analysis..."):
                 ai_analysis = generate_ai_analysis(data)
-                st.subheader("🤖 AI Analysis")
-                st.markdown(f"<div style='background-color: #e8f5e9; padding: 10px; border-radius: 5px;'>{ai_analysis}</div>", unsafe_allow_html=True)
 
+            # **Display AI Analysis**
+            st.subheader("🤖 AI Analysis")
+            st.write(ai_analysis)
 
