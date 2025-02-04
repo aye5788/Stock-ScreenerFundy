@@ -5,8 +5,7 @@ import pandas as pd
 from datetime import datetime
 
 # **Load API Keys**
-FMP_API_KEY = st.secrets["FMP_API_KEY"]  # ✅ Financial Modeling Prep for Company Profile & Sector P/E
-AV_API_KEY = st.secrets["ALPHA_VANTAGE_API_KEY"]  # ✅ Alpha Vantage for missing Fundamental Data
+FMP_API_KEY = st.secrets["FMP_API_KEY"]  # ✅ Financial Modeling Prep for all data
 OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]  # ✅ OpenAI for AI analysis
 
 # **Initialize OpenAI client**
@@ -24,7 +23,7 @@ def format_large_number(value):
     except (ValueError, TypeError):
         return "N/A"
 
-# **Fetch Company Profile from FMP (Sector, Industry, Stock Price)**
+# **Fetch Company Profile from FMP**
 def fetch_company_profile(ticker):
     url = f"https://financialmodelingprep.com/api/v3/profile/{ticker}?apikey={FMP_API_KEY}"
     response = requests.get(url).json()
@@ -34,20 +33,25 @@ def fetch_company_profile(ticker):
             "Company Name": company_data.get("companyName", "N/A"),
             "Sector": company_data.get("sector", "N/A"),
             "Industry": company_data.get("industry", "N/A"),
-            "Stock Price": f"${company_data.get('price', 'N/A')}"
+            "Stock Price": f"${company_data.get('price', 'N/A')}",
+            "Market Cap": format_large_number(company_data.get("mktCap", "N/A")),
         }
     return None
 
-# **Fetch ONLY Missing Fundamental Data from Alpha Vantage**
-def fetch_missing_fundamentals(ticker):
-    url = f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={ticker}&apikey={AV_API_KEY}"
+# **Fetch Fundamental Data from FMP**
+def fetch_fundamentals(ticker):
+    url = f"https://financialmodelingprep.com/api/v3/ratios-ttm/{ticker}?apikey={FMP_API_KEY}"
     response = requests.get(url).json()
-    return {
-        "Net Income": format_large_number(response.get("NetIncomeTTM", "N/A")),
-        "Total Assets": format_large_number(response.get("TotalAssets", "N/A")),
-        "Total Liabilities": format_large_number(response.get("TotalLiabilities", "N/A")),
-        "P/E Ratio": response.get("PERatio", "N/A")
-    }
+    if response and isinstance(response, list):
+        fundamentals = response[0]
+        return {
+            "Revenue": format_large_number(fundamentals.get("revenueTTM", "N/A")),
+            "Net Income": format_large_number(fundamentals.get("netIncomeTTM", "N/A")),
+            "Total Assets": format_large_number(fundamentals.get("totalAssets", "N/A")),
+            "Total Liabilities": format_large_number(fundamentals.get("totalLiabilities", "N/A")),
+            "P/E Ratio": fundamentals.get("peRatioTTM", "N/A"),
+        }
+    return None
 
 # **Fetch Sector P/E from FMP**
 def fetch_sector_pe(sector):
@@ -92,14 +96,14 @@ ticker = st.text_input("Enter a stock ticker (e.g., TSLA, AAPL):", value="AAPL")
 if st.button("Analyze Stock"):
     with st.spinner("Fetching data..."):
         company_profile = fetch_company_profile(ticker)
-        missing_fundamentals = fetch_missing_fundamentals(ticker)
+        fundamentals = fetch_fundamentals(ticker)
         sector_pe = fetch_sector_pe(company_profile["Sector"]) if company_profile else "N/A"
 
-        if company_profile:
+        if company_profile and fundamentals:
             data = {
                 "Ticker": ticker,
                 **company_profile,
-                **missing_fundamentals,
+                **fundamentals,
                 "Sector P/E": sector_pe
             }
 
@@ -114,4 +118,3 @@ if st.button("Analyze Stock"):
             # **Display AI Analysis**
             st.subheader("🤖 AI Analysis")
             st.write(ai_analysis)
-
