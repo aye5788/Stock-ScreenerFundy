@@ -1,81 +1,48 @@
 import streamlit as st
-import requests
 import openai
-import pandas as pd
-from datetime import datetime
+import requests
 
-# Load API Keys
-FMP_API_KEY = st.secrets["FMP_API_KEY"]  # Financial Modeling Prep API Key
-OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]  # OpenAI API Key
+# Set API keys
+FMP_API_KEY = "YOUR_FMP_API_KEY"
+OPENAI_API_KEY = "YOUR_OPENAI_API_KEY"
 
-# Initialize OpenAI client
-openai.api_key = OPENAI_API_KEY
+# Function to fetch fundamental data from FMP
+def fetch_fundamental_data(ticker):
+    base_url = "https://financialmodelingprep.com/api/v3"
+    
+    # Fetch company profile
+    profile_url = f"{base_url}/profile/{ticker}?apikey={FMP_API_KEY}"
+    profile_response = requests.get(profile_url).json()
+    company_data = profile_response[0] if profile_response else {}
 
-# Format Large Numbers
-def format_large_number(value):
-    try:
-        value = float(value)
-        if value >= 1e9:
-            return f"{value / 1e9:.2f}B"
-        elif value >= 1e6:
-            return f"{value / 1e6:.2f}M"
-        return f"{value:.2f}"
-    except (ValueError, TypeError):
-        return "N/A"
+    # Fetch P/E Ratio from Ratios API
+    ratios_url = f"{base_url}/ratios/{ticker}?period=annual&limit=1&apikey={FMP_API_KEY}"
+    ratios_response = requests.get(ratios_url).json()
+    pe_ratio = ratios_response[0].get("peRatio", "N/A") if ratios_response else "N/A"
 
-# Fetch Company Profile from FMP
-def fetch_company_profile(ticker):
-    url = f"https://financialmodelingprep.com/api/v3/profile/{ticker}?apikey={FMP_API_KEY}"
-    response = requests.get(url).json()
-    if response and isinstance(response, list):
-        company_data = response[0]
-        return {
-            "Company Name": company_data.get("companyName", "N/A"),
-            "Sector": company_data.get("sector", "N/A"),
-            "Industry": company_data.get("industry", "N/A"),
-            "Stock Price": f"${company_data.get('price', 'N/A')}",
-            "Market Cap": format_large_number(company_data.get("mktCap", "N/A")),
-            "P/E Ratio": company_data.get("pe", "N/A")
-        }
-    return None
+    # Create data dictionary
+    data = {
+        "Ticker": ticker,
+        "Company Name": company_data.get("companyName", "N/A"),
+        "Sector": company_data.get("sector", "N/A"),
+        "Industry": company_data.get("industry", "N/A"),
+        "Stock Price": company_data.get("price", "N/A"),
+        "Market Cap": company_data.get("mktCap", "N/A"),
+        "Revenue": company_data.get("revenue", "N/A"),
+        "Net Income": company_data.get("netIncome", "N/A"),
+        "Total Assets": company_data.get("totalAssets", "N/A"),
+        "Total Liabilities": company_data.get("totalLiabilities", "N/A"),
+        "P/E Ratio": pe_ratio,
+    }
 
-# Fetch Income Statement from FMP
-def fetch_income_statement(ticker):
-    url = f"https://financialmodelingprep.com/api/v3/income-statement/{ticker}?limit=1&apikey={FMP_API_KEY}"
-    response = requests.get(url).json()
-    if response and isinstance(response, list):
-        income_data = response[0]
-        return {
-            "Revenue": format_large_number(income_data.get("revenue", "N/A")),
-            "Net Income": format_large_number(income_data.get("netIncome", "N/A"))
-        }
-    return None
+    return data
 
-# Fetch Balance Sheet Statement from FMP
-def fetch_balance_sheet(ticker):
-    url = f"https://financialmodelingprep.com/api/v3/balance-sheet-statement/{ticker}?limit=1&apikey={FMP_API_KEY}"
-    response = requests.get(url).json()
-    if response and isinstance(response, list):
-        balance_data = response[0]
-        return {
-            "Total Assets": format_large_number(balance_data.get("totalAssets", "N/A")),
-            "Total Liabilities": format_large_number(balance_data.get("totalLiabilities", "N/A"))
-        }
-    return None
-
-# Fetch Sector P/E from FMP
-def fetch_sector_pe(sector):
-    url = f"https://financialmodelingprep.com/api/v4/sector_price_earning_ratio?date={datetime.today().strftime('%Y-%m-%d')}&exchange=NYSE&apikey={FMP_API_KEY}"
-    response = requests.get(url).json()
-    for entry in response:
-        if entry["sector"].lower() == sector.lower():
-            return entry["pe"]
-    return "N/A"
-
-# Generate AI Analysis
+# Function to generate AI analysis using OpenAI
 def generate_ai_analysis(data):
+    openai.api_key = OPENAI_API_KEY
+
     prompt = f"""
-    Analyze the following fundamental data for {data['Company Name']} ({data['Ticker']}):
+    Analyze the following company's fundamentals and provide insights:
     
     - Sector: {data['Sector']}
     - Industry: {data['Industry']}
@@ -83,54 +50,32 @@ def generate_ai_analysis(data):
     - Market Cap: {data['Market Cap']}
     - Revenue: {data['Revenue']}
     - Net Income: {data['Net Income']}
-    - Total Assets: {data['Total Assets']}
-    - Total Liabilities: {data['Total Liabilities']}
     - P/E Ratio: {data['P/E Ratio']}
-    - Sector P/E: {data['Sector P/E']}
-    
-    Provide an investment analysis and estimate a fair value price.
+
+    Provide a structured financial analysis.
     """
 
-    response = openai.Completion.create(
-        engine="text-davinci-003",
-        prompt=prompt,
-        max_tokens=150
+    response = openai.ChatCompletion.create(
+        model="gpt-4",
+        messages=[{"role": "system", "content": "You are a financial analyst."},
+                  {"role": "user", "content": prompt}]
     )
 
-    return response.choices[0].text.strip()
+    return response["choices"][0]["message"]["content"]
 
 # Streamlit UI
 st.title("📈 AI-Powered Stock Screener")
 st.write("Enter a stock ticker below to get AI-powered fundamental analysis and a fair value estimate.")
 
-ticker = st.text_input("Enter a stock ticker (e.g., TSLA, AAPL):", value="AAPL").upper()
+ticker = st.text_input("Enter a stock ticker (e.g., TSLA, AAPL):", value="AAPL")
 if st.button("Analyze Stock"):
     with st.spinner("Fetching data..."):
-        company_profile = fetch_company_profile(ticker)
-        income_statement = fetch_income_statement(ticker)
-        balance_sheet = fetch_balance_sheet(ticker)
-        sector_pe = fetch_sector_pe(company_profile["Sector"]) if company_profile else "N/A"
+        data = fetch_fundamental_data(ticker)
+        st.subheader("📊 Fundamental Data Summary")
+        st.dataframe(pd.DataFrame(data.items(), columns=["Metric", "Value"]))
 
-        if company_profile and income_statement and balance_sheet:
-            data = {
-                "Ticker": ticker,
-                **company_profile,
-                **income_statement,
-                **balance_sheet,
-                "Sector P/E": sector_pe
-            }
-
-            # Display Fundamental Data
-            st.subheader("📊 Fundamental Data Summary")
-            st.dataframe(pd.DataFrame(data.items(), columns=["Metric", "Value"]))
-
-            # Run AI Analysis
-            with st.spinner("Running AI analysis..."):
-                ai_analysis = generate_ai_analysis(data)
-
-            # Display AI Analysis
-            st.subheader("🤖 AI Analysis")
-            st.write(ai_analysis)
-        else:
-            st.error("Failed to retrieve data for the given ticker. Please check the ticker symbol and try again.")
+    with st.spinner("Running AI analysis..."):
+        ai_analysis = generate_ai_analysis(data)
+        st.subheader("🤖 AI Analysis")
+        st.write(ai_analysis)
 
